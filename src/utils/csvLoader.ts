@@ -1,3 +1,4 @@
+
 import Papa from 'papaparse';
 import { ClassData, PriorityClass } from '../types';
 
@@ -132,7 +133,7 @@ export async function loadCSVFiles(): Promise<CSVLoadResult> {
   }
 
   try {
-    // Load Classes.csv
+    // Load Classes.csv - this appears to be the same structure as Scoring.csv based on the provided data
     console.log('🔄 Loading Classes.csv...');
     const classesResponse = await fetch('/Classes.csv');
     if (!classesResponse.ok) {
@@ -156,28 +157,62 @@ export async function loadCSVFiles(): Promise<CSVLoadResult> {
       result.errors.push(...classesParsed.errors.map(e => `Classes.csv: ${e.message}`));
     }
 
-    // Transform Classes.csv data to PriorityClass format
-    result.priorityClasses = classesParsed.data
-      .filter((row: any) => row && (row['Class Name'] || row['className'] || row['Cleaned Class']))
-      .map((row: any, index: number) => {
-        try {
-          const className = String(row['Class Name'] || row['className'] || row['Cleaned Class'] || '').trim();
-          const priority = parseInt(row['Priority'] || row['priority'] || '1');
-          const mustInclude = String(row['Must Include'] || row['mustInclude'] || 'true').toLowerCase() === 'true';
-
-          return {
-            className,
-            priority: isNaN(priority) ? 1 : priority,
-            mustInclude
-          };
-        } catch (error) {
-          console.error(`Error processing Classes.csv row ${index + 1}:`, error, row);
-          return null;
-        }
+    // Since Classes.csv has the same structure as Scoring.csv, we'll extract priority classes
+    // based on performance metrics from the Classes.csv data
+    console.log('📊 Extracting priority classes from Classes.csv data...');
+    
+    const topPerformingClasses = classesParsed.data
+      .filter((row: any) => {
+        // Filter for active, high-performing classes
+        const adjustedScore = parseFloat(row['Adjusted Score'] || '0');
+        const avgAttendance = parseFloat(row['Avg Attendance (w/o empty)'] || '0');
+        const classStatus = String(row['Class Status'] || '').trim();
+        const fillRate = parseFloat(row['Avg Fill Rate (%)'] || '0');
+        
+        return classStatus === 'Active' && 
+               adjustedScore > 150 && 
+               avgAttendance >= 6 && 
+               fillRate >= 50;
       })
-      .filter((item): item is PriorityClass => item !== null && item.className !== '');
+      .sort((a: any, b: any) => {
+        // Sort by adjusted score descending
+        const scoreA = parseFloat(a['Adjusted Score'] || '0');
+        const scoreB = parseFloat(b['Adjusted Score'] || '0');
+        return scoreB - scoreA;
+      })
+      .slice(0, 30) // Top 30 performing classes
+      .map((row: any, index: number) => {
+        const className = String(row['Cleaned Class'] || '').trim();
+        const dayOfWeek = String(row['Day of Week'] || '').trim();
+        const classTime = String(row['Class Time'] || '').trim();
+        const location = String(row['Location'] || '').trim();
+        const trainerName = String(row['Trainer Name'] || '').trim();
+        const adjustedScore = parseFloat(row['Adjusted Score'] || '0');
+        const avgAttendance = parseFloat(row['Avg Attendance (w/o empty)'] || '0');
+        
+        return {
+          className,
+          priority: 30 - index, // Higher priority for better performing classes
+          mustInclude: index < 15, // Top 15 are must-include
+          dayOfWeek,
+          classTime,
+          location,
+          trainerName,
+          adjustedScore,
+          avgAttendance,
+          // Create a unique key for this specific class-day-time-location-trainer combination
+          scheduleKey: `${className}-${dayOfWeek}-${classTime}-${location}-${trainerName}`
+        };
+      });
 
-    console.log(`✅ Loaded ${result.priorityClasses.length} priority classes from Classes.csv`);
+    result.priorityClasses = topPerformingClasses;
+    console.log(`✅ Extracted ${result.priorityClasses.length} priority classes from Classes.csv`);
+    
+    // Log the top 10 priority classes for verification
+    console.log('🏆 Top 10 Priority Classes:');
+    result.priorityClasses.slice(0, 10).forEach((pc, idx) => {
+      console.log(`${idx + 1}. ${pc.className} with ${pc.trainerName} - ${pc.dayOfWeek} ${pc.classTime} at ${pc.location} (Score: ${pc.adjustedScore})`);
+    });
 
   } catch (error) {
     console.error('Error loading Classes.csv:', error);
@@ -191,11 +226,18 @@ export async function loadCSVFiles(): Promise<CSVLoadResult> {
       const topClasses = result.scoringData
         .filter(item => item.adjustedScore && item.avgAttendanceWithEmpty && item.avgAttendanceWithEmpty >= 6)
         .sort((a, b) => (b.adjustedScore || 0) - (a.adjustedScore || 0))
-        .slice(0, 15) // Top 15 classes
+        .slice(0, 20) // Top 20 classes
         .map((item, index) => ({
           className: item.cleanedClass,
-          priority: 15 - index, // Higher priority for better performing classes
-          mustInclude: index < 10 // Top 10 are must-include
+          priority: 20 - index, // Higher priority for better performing classes
+          mustInclude: index < 10, // Top 10 are must-include
+          dayOfWeek: item.dayOfWeek,
+          classTime: item.classTime,
+          location: item.location,
+          trainerName: item.teacherName,
+          adjustedScore: item.adjustedScore || 0,
+          avgAttendance: item.avgAttendanceWithEmpty || 0,
+          scheduleKey: `${item.cleanedClass}-${item.dayOfWeek}-${item.classTime}-${item.location}-${item.teacherName}`
         }));
 
       result.priorityClasses = topClasses;
@@ -216,6 +258,24 @@ export function getPriorityClassFormats(priorityClasses: PriorityClass[]): strin
 }
 
 /**
+ * Get priority classes with their specific scheduling details
+ */
+export function getPriorityClassSchedules(priorityClasses: PriorityClass[]): any[] {
+  return priorityClasses
+    .sort((a, b) => b.priority - a.priority)
+    .map(pc => ({
+      className: pc.className,
+      dayOfWeek: pc.dayOfWeek,
+      classTime: pc.classTime,
+      location: pc.location,
+      trainerName: pc.trainerName,
+      priority: pc.priority,
+      mustInclude: pc.mustInclude,
+      scheduleKey: pc.scheduleKey
+    }));
+}
+
+/**
  * Check if a class format is a priority class
  */
 export function isPriorityClass(classFormat: string, priorityClasses: PriorityClass[]): boolean {
@@ -227,4 +287,31 @@ export function isPriorityClass(classFormat: string, priorityClasses: PriorityCl
  */
 export function getMustIncludeClasses(priorityClasses: PriorityClass[]): PriorityClass[] {
   return priorityClasses.filter(pc => pc.mustInclude);
+}
+
+/**
+ * Get the best trainer for a specific class format based on performance data
+ */
+export function getBestTrainerForClass(classFormat: string, priorityClasses: PriorityClass[]): string | null {
+  const matchingClass = priorityClasses.find(pc => pc.className === classFormat);
+  return matchingClass ? matchingClass.trainerName : null;
+}
+
+/**
+ * Get the optimal day and time for a specific class format
+ */
+export function getOptimalScheduleForClass(classFormat: string, priorityClasses: PriorityClass[]): {
+  dayOfWeek: string;
+  classTime: string;
+  location: string;
+} | null {
+  const matchingClass = priorityClasses.find(pc => pc.className === classFormat);
+  if (matchingClass) {
+    return {
+      dayOfWeek: matchingClass.dayOfWeek,
+      classTime: matchingClass.classTime,
+      location: matchingClass.location
+    };
+  }
+  return null;
 }

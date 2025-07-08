@@ -18,7 +18,7 @@ import { ClassData, ScheduledClass, TeacherHours, CustomTeacher, TeacherAvailabi
 import { getTopPerformingClasses, getClassDuration, calculateTeacherHours, getClassCounts, validateTeacherHours, getTeacherSpecialties, getClassAverageForSlot, getBestTeacherForClass, generateIntelligentSchedule, getDefaultTopClasses, fillEmptySlots } from './utils/classUtils';
 import { aiService } from './utils/aiService';
 import { saveCSVData, loadCSVData, saveScheduledClasses, loadScheduledClasses, saveCustomTeachers, loadCustomTeachers, saveTeacherAvailability, loadTeacherAvailability } from './utils/dataStorage';
-import { loadCSVFiles, getPriorityClassFormats, isPriorityClass, getMustIncludeClasses } from './utils/csvLoader';
+import { loadCSVFiles, getPriorityClassFormats, getPriorityClassSchedules, isPriorityClass, getMustIncludeClasses, getBestTrainerForClass, getOptimalScheduleForClass } from './utils/csvLoader';
 
 // Minimalist theme definitions with black/white backgrounds
 const THEMES = {
@@ -373,69 +373,121 @@ function App() {
     setIsPopulatingTopClasses(true);
 
     try {
-      console.log('🚀 Starting enhanced top classes population with priority classes and comprehensive constraints...');
+      console.log('🚀 Starting accurate top classes population using Classes.csv priority data...');
       
       // Clear existing schedule first
       setScheduledClasses([]);
       
-      // Get priority class formats
-      const priorityClassFormats = getPriorityClassFormats(priorityClasses);
-      const mustIncludeClasses = getMustIncludeClasses(priorityClasses);
+      // Get priority class schedules with specific day/time/trainer combinations
+      const prioritySchedules = getPriorityClassSchedules(priorityClasses);
       
-      console.log(`📋 Priority classes: ${priorityClassFormats.join(', ')}`);
-      console.log(`⭐ Must-include classes: ${mustIncludeClasses.map(c => c.className).join(', ')}`);
+      console.log(`📋 Found ${prioritySchedules.length} priority class schedules from Classes.csv`);
       
-      // Use the enhanced generateIntelligentSchedule function
-      const optimizedSchedule = await generateIntelligentSchedule(data, customTeachers, {
-        prioritizeTopPerformers: true,
-        balanceShifts: true,
-        optimizeTeacherHours: true,
-        respectTimeRestrictions: true,
-        minimizeTrainersPerShift: true,
-        optimizationType: 'balanced',
-        targetTeacherHours: 15,
-        priorityClassFormats,
-        mustIncludeClasses: mustIncludeClasses.map(c => c.className)
-      });
+      const newScheduledClasses: ScheduledClass[] = [];
+      const trainerTimeSlots = new Map<string, Set<string>>(); // Track trainer availability
+      
+      // Sort priority schedules by priority (highest first)
+      const sortedPrioritySchedules = prioritySchedules.sort((a, b) => b.priority - a.priority);
+      
+      for (const prioritySchedule of sortedPrioritySchedules) {
+        const {
+          className,
+          dayOfWeek,
+          classTime,
+          location,
+          trainerName,
+          mustInclude
+        } = prioritySchedule;
+        
+        // Parse trainer name
+        const nameParts = trainerName.split(' ');
+        const teacherFirstName = nameParts[0] || '';
+        const teacherLastName = nameParts.slice(1).join(' ') || '';
+        
+        // Create time slot key for conflict checking
+        const timeSlotKey = `${trainerName}-${dayOfWeek}-${classTime}`;
+        
+        // Check for trainer conflicts
+        if (!trainerTimeSlots.has(trainerName)) {
+          trainerTimeSlots.set(trainerName, new Set());
+        }
+        
+        const trainerSlots = trainerTimeSlots.get(trainerName)!;
+        const slotKey = `${dayOfWeek}-${classTime}`;
+        
+        if (trainerSlots.has(slotKey)) {
+          console.log(`⚠️ Skipping ${className} - trainer ${trainerName} already scheduled at ${dayOfWeek} ${classTime}`);
+          continue;
+        }
+        
+        // Find matching data from CSV for this specific combination
+        const matchingData = data.find(item => 
+          item.cleanedClass === className &&
+          item.dayOfWeek === dayOfWeek &&
+          item.classTime === classTime &&
+          item.location === location &&
+          item.teacherName === trainerName
+        );
+        
+        if (!matchingData) {
+          console.log(`⚠️ No matching CSV data found for ${className} with ${trainerName} on ${dayOfWeek} ${classTime}`);
+          continue;
+        }
+        
+        // Create scheduled class with accurate data
+        const scheduledClass: ScheduledClass = {
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          day: dayOfWeek,
+          time: classTime,
+          location: location,
+          classFormat: className,
+          teacherFirstName,
+          teacherLastName,
+          duration: '1', // Default 1 hour
+          participants: matchingData.avgAttendanceWithEmpty || 0,
+          revenue: matchingData.revenuePerClass || 0,
+          isTopPerformer: true,
+          isPrivate: false,
+          adjustedScore: matchingData.adjustedScore || 0,
+          avgAttendance: matchingData.avgAttendanceWithEmpty || 0,
+          fillRate: matchingData.avgFillRate || 0
+        };
+        
+        newScheduledClasses.push(scheduledClass);
+        trainerSlots.add(slotKey);
+        
+        console.log(`✅ Scheduled: ${className} with ${trainerName} on ${dayOfWeek} ${classTime} at ${location}`);
+      }
+      
+      console.log(`✅ Top classes population complete: ${newScheduledClasses.length} classes scheduled`);
 
-      console.log(`✅ Enhanced population complete: ${optimizedSchedule.length} classes scheduled`);
-
-      if (optimizedSchedule.length > 0) {
-        setScheduledClasses(optimizedSchedule);
-        setTeacherHours(calculateTeacherHours(optimizedSchedule));
+      if (newScheduledClasses.length > 0) {
+        setScheduledClasses(newScheduledClasses);
+        setTeacherHours(calculateTeacherHours(newScheduledClasses));
         
         // Calculate summary stats
-        const teacherHoursCheck = calculateTeacherHours(optimizedSchedule);
-        const teachersAt15h = Object.values(teacherHoursCheck).filter(h => h >= 14.5).length;
+        const teacherHoursCheck = calculateTeacherHours(newScheduledClasses);
         const totalTeachers = Object.keys(teacherHoursCheck).length;
-        const avgUtilization = Object.values(teacherHoursCheck).reduce((sum, hours) => sum + hours, 0) / totalTeachers / 15;
+        const avgRevenue = newScheduledClasses.reduce((sum, cls) => sum + (cls.revenue || 0), 0) / newScheduledClasses.length;
+        const avgAttendance = newScheduledClasses.reduce((sum, cls) => sum + (cls.participants || 0), 0) / newScheduledClasses.length;
         
-        const priorityClassesScheduled = optimizedSchedule.filter(cls => 
-          isPriorityClass(cls.classFormat, priorityClasses)
-        ).length;
-        
-        alert(`✅ Enhanced Top Classes Population Complete!
+        alert(`✅ Top Classes Populated Successfully!
 
 📊 Results:
-• ${optimizedSchedule.length} classes scheduled
-• ${totalTeachers} teachers utilized
-• ${teachersAt15h} teachers at 15h target (${((teachersAt15h/totalTeachers)*100).toFixed(0)}%)
-• ${(avgUtilization * 100).toFixed(1)}% average teacher utilization
-• ${priorityClassesScheduled} priority classes included
+• ${newScheduledClasses.length} top-performing classes scheduled
+• ${totalTeachers} teachers assigned
+• Average revenue per class: ₹${avgRevenue.toFixed(0)}
+• Average attendance: ${avgAttendance.toFixed(1)} participants
+• All classes scheduled at their optimal day/time from Classes.csv
 
-🎯 Enhanced Features Applied:
-• Studio capacity constraints respected
-• No trainer conflicts or cross-location assignments
-• Maximum 2 consecutive classes per trainer
-• Maximum 4 classes per day per trainer
-• All 15-minute time intervals utilized
-• Location-specific format rules enforced
-• New trainer restrictions applied
-• Shift separation optimized
-• Inactive teachers (Nishanth, Saniya) excluded
-• Priority classes from Classes.csv prioritized`);
+🎯 Features Applied:
+• Exact day/time combinations from Classes.csv
+• Best trainer assignments from historical data
+• No trainer scheduling conflicts
+• Priority-based scheduling (highest performing first)
+• Must-include classes prioritized`);
       } else {
-        alert('No classes could be scheduled due to constraints. Please check your data and try again.');
+        alert('No classes could be scheduled. Please check your Classes.csv data.');
       }
 
     } catch (error) {
@@ -455,67 +507,57 @@ function App() {
     setIsOptimizing(true);
 
     try {
-      console.log('🚀 Starting enhanced AI optimization with priority classes and comprehensive constraints...');
+      console.log(`🚀 Starting optimization iteration #${optimizationIteration + 1} using Scoring.csv data...`);
       
       // Get priority class formats
       const priorityClassFormats = getPriorityClassFormats(priorityClasses);
       const mustIncludeClasses = getMustIncludeClasses(priorityClasses);
       
-      // Enhanced AI optimization with all constraints
+      // Enhanced AI optimization with iteration-based variation
       const optimizedSchedule = await generateIntelligentSchedule(csvData, customTeachers, {
         prioritizeTopPerformers: true,
         balanceShifts: true,
         optimizeTeacherHours: true,
         respectTimeRestrictions: true,
         minimizeTrainersPerShift: true,
-        iteration: optimizationIteration,
-        optimizationType: 'balanced',
+        iteration: optimizationIteration + 1, // Use next iteration number
+        optimizationType: optimizationIteration % 3 === 0 ? 'revenue' : optimizationIteration % 3 === 1 ? 'attendance' : 'balanced',
         targetTeacherHours: 15,
         priorityClassFormats,
         mustIncludeClasses: mustIncludeClasses.map(c => c.className)
       });
       
-      console.log(`🎯 Enhanced AI optimization complete: ${optimizedSchedule.length} classes scheduled`);
+      console.log(`🎯 Optimization iteration #${optimizationIteration + 1} complete: ${optimizedSchedule.length} classes scheduled`);
       
       // Calculate final teacher hours and stats
       const teacherHoursCheck = calculateTeacherHours(optimizedSchedule);
       const teachersAt15h = Object.values(teacherHoursCheck).filter(h => h >= 14.5).length;
-      const teachersAt12h = Object.values(teacherHoursCheck).filter(h => h >= 12).length;
       const totalTeachers = Object.keys(teacherHoursCheck).length;
-      const avgUtilization = Object.values(teacherHoursCheck).reduce((sum, hours) => sum + hours, 0) / totalTeachers / 15;
-
-      const priorityClassesScheduled = optimizedSchedule.filter(cls => 
-        isPriorityClass(cls.classFormat, priorityClasses)
-      ).length;
+      const totalRevenue = optimizedSchedule.reduce((sum, cls) => sum + (cls.revenue || 0), 0);
+      const totalAttendance = optimizedSchedule.reduce((sum, cls) => sum + (cls.participants || 0), 0);
 
       setOptimizationIteration(prev => prev + 1);
       setScheduledClasses(optimizedSchedule);
       setTeacherHours(teacherHoursCheck);
 
-      // Show comprehensive optimization results
-      alert(`🎯 Enhanced AI Optimization Complete!
+      const optimizationType = (optimizationIteration) % 3 === 0 ? 'Revenue-Focused' : (optimizationIteration) % 3 === 1 ? 'Attendance-Focused' : 'Balanced';
 
-📊 Results:
+      // Show optimization results
+      alert(`🎯 Optimization Iteration #${optimizationIteration + 1} Complete!
+
+📊 ${optimizationType} Strategy Results:
 • ${optimizedSchedule.length} classes scheduled
 • ${totalTeachers} teachers utilized
 • ${teachersAt15h} teachers at 15h target (${((teachersAt15h/totalTeachers)*100).toFixed(0)}%)
-• ${teachersAt12h} teachers at 12+ hours (${((teachersAt12h/totalTeachers)*100).toFixed(0)}%)
-• ${(avgUtilization * 100).toFixed(1)}% average teacher utilization
-• ${priorityClassesScheduled} priority classes included
+• Total revenue: ₹${totalRevenue.toFixed(0)}
+• Total attendance: ${totalAttendance} participants
 
-✅ Enhanced Optimization Features:
-• Studio capacity constraints enforced
-• No trainer conflicts or overlaps
-• Maximum 2 consecutive classes per trainer
-• Maximum 4 classes per day per trainer
-• One location per trainer per day
-• Shift separation optimized
-• All 15-minute intervals utilized
-• Location-specific format rules applied
-• New trainer restrictions enforced
-• Teacher hour targets optimized
-• Inactive teachers (Nishanth, Saniya) excluded
-• Priority classes from Classes.csv prioritized`);
+✅ Features Applied:
+• Scoring.csv data utilized for optimization
+• Teacher hour maximization
+• Class mix balancing
+• Performance-based assignments
+• Comprehensive constraint compliance`);
 
     } catch (error) {
       console.error('Error optimizing schedule:', error);
@@ -754,7 +796,7 @@ function App() {
               <h1 className={`text-4xl font-bold ${theme.text}`}>
                 Smart Class Scheduler
               </h1>
-              <p className={theme.textSecondary}>AI-powered optimization with comprehensive constraints</p>
+              <p className={theme.textSecondary}>AI-powered optimization using Classes.csv and Scoring.csv data</p>
             </div>
           </div>
           
@@ -807,28 +849,28 @@ function App() {
               onClick={() => handleAutoPopulateTopClasses(csvData)}
               disabled={isPopulatingTopClasses}
               className={`flex items-center justify-center px-4 py-3 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105 bg-yellow-600 text-white hover:bg-yellow-700`}
-              title="Enhanced population with ALL constraints and 15-min intervals"
+              title="Populate ONLY top classes from Classes.csv at exact day/time with best trainers"
             >
               {isPopulatingTopClasses ? (
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
               ) : (
                 <Star className="h-4 w-4 mr-2" />
               )}
-              <span className="text-sm font-medium">Enhanced Top Classes</span>
+              <span className="text-sm font-medium">Top Classes (CSV)</span>
             </button>
             
             <button
               onClick={handleAutoOptimize}
               disabled={isOptimizing}
               className={`flex items-center justify-center px-4 py-3 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105 bg-green-600 text-white hover:bg-green-700`}
-              title="Enhanced AI with ALL constraints and studio capacity checks"
+              title="Generate new optimization iteration using Scoring.csv data to maximize trainer hours"
             >
               {isOptimizing ? (
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
               ) : (
                 <Brain className="h-4 w-4 mr-2" />
               )}
-              <span className="text-sm font-medium">Enhanced AI</span>
+              <span className="text-sm font-medium">Optimize (Iter #{optimizationIteration + 1})</span>
             </button>
 
             {/* Enhanced Fill Additional Slots Button */}
