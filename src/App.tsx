@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Upload, Calendar, Brain, Users, Clock, AlertTriangle, Settings, Star, Lock, Unlock, Plus, Download, Eye, Printer, RotateCcw, RotateCw, Trash2, Filter, BarChart3, TrendingUp, MapPin, UserPlus, Sun, Moon, Zap, Target, Sparkles, Palette } from 'lucide-react';
 import CSVUpload from './components/CSVUpload';
@@ -1021,6 +1022,7 @@ function App() {
             csvData={csvData}
             currentSchedule={scheduledClasses}
             onOptimize={handleOptimizedSchedule}
+            isDarkMode={currentTheme === 'dark' || currentTheme === 'darkPurple' || currentTheme === 'darkGreen'}
           />
         )}
 
@@ -1032,6 +1034,7 @@ function App() {
             csvData={csvData}
             currentSchedule={scheduledClasses}
             onOptimize={handleOptimizedSchedule}
+            isDarkMode={currentTheme === 'dark' || currentTheme === 'darkPurple' || currentTheme === 'darkGreen'}
           />
         )}
 
@@ -1043,6 +1046,7 @@ function App() {
             csvData={csvData}
             currentSchedule={scheduledClasses}
             onOptimize={handleOptimizedSchedule}
+            isDarkMode={currentTheme === 'dark' || currentTheme === 'darkPurple' || currentTheme === 'darkGreen'}
           />
         )}
 
