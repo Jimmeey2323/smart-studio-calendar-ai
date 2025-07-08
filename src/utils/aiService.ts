@@ -61,7 +61,7 @@ class AIService {
   ): Promise<ScheduledClass[]> {
     if (!this.provider || !this.provider.key || this.provider.key.trim() === '') {
       console.warn('🤖 AI Service: Provider not configured, using enhanced intelligent local optimization');
-      return this.generateEnhancedLocalSchedule(historicData, currentSchedule, customTeachers, options);
+      return await this.generateEnhancedLocalSchedule(historicData, currentSchedule, customTeachers, options);
     }
 
     const prompt = this.buildAdvancedOptimizationPrompt(historicData, currentSchedule, customTeachers, options);
@@ -74,7 +74,7 @@ class AIService {
       return optimizedSchedule;
     } catch (error) {
       console.warn('🤖 AI Service: Optimization error, falling back to enhanced intelligent local optimization:', error);
-      return this.generateEnhancedLocalSchedule(historicData, currentSchedule, customTeachers, options);
+      return await this.generateEnhancedLocalSchedule(historicData, currentSchedule, customTeachers, options);
     }
   }
 
@@ -403,7 +403,7 @@ class AIService {
     currentSchedule: ScheduledClass[],
     customTeachers: any[],
     options: any
-): Promise<ScheduledClass[]> {
+  ): Promise<ScheduledClass[]> {
     console.log(`🔄 AI Service: Generating enhanced local schedule with ${options.optimizationType || 'balanced'} optimization...`);
     
     // Use the enhanced generateIntelligentSchedule function from classUtils
@@ -703,7 +703,7 @@ class AIService {
     location: string, 
     day: string, 
     time: string
-): AIRecommendation[] {
+  ): AIRecommendation[] {
     console.log(`🔄 AI Service: Generating enhanced fallback recommendations for ${location} on ${day} at ${time}`);
     
     // Filter out inactive teachers from data

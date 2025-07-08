@@ -1,834 +1,428 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Clock, Users, TrendingUp, Star, Lock, Zap, Award, Calendar, Target, ChevronDown, ChevronUp, Filter, Eye, Edit, ChevronLeft, ChevronRight, AlertTriangle, Shield, EyeOff, Plus } from 'lucide-react';
-import { ClassData, ScheduledClass, AIRecommendation } from '../types';
-import { getClassAverageForSlot, getTimeSlotsWithData, getClassesAtTimeSlot, getAvailableTimeSlots, getRestrictedTimeSlots, isTimeRestricted, ALL_TIME_SLOTS, hasHistoricalData, getBestSlotRecommendation, getDetailedHistoricAnalysis } from '../utils/classUtils';
-import { aiService } from '../utils/aiService';
+import React, { useState, useEffect } from 'react';
+import { Calendar, Plus, Download, Settings, Zap, Brain, TrendingUp, Users, MapPin, Clock, ChevronLeft, ChevronRight, Eye, EyeOff, Filter, Star, Award } from 'lucide-react';
+import { ClassData, ScheduledClass, OptimizationSuggestion, TopPerformingClass, CustomTeacher } from '../types';
+import ClassModal from './ClassModal';
 import DayViewModal from './DayViewModal';
+import SmartOptimizer from './SmartOptimizer';
+import EnhancedOptimizerModal from './EnhancedOptimizerModal';
+import { exportScheduleToCSV, exportScheduleToPDF } from '../utils/exportUtils';
+import { aiService } from '../utils/aiService';
 
 interface WeeklyCalendarProps {
-  location: string;
   csvData: ClassData[];
   scheduledClasses: ScheduledClass[];
-  onSlotClick: (day: string, time: string, location: string) => void;
-  onClassEdit: (classData: ScheduledClass) => void;
-  lockedClasses?: Set<string>;
-  theme: any;
-  allowRestrictedScheduling: boolean;
+  onClassUpdate: (updatedClass: ScheduledClass) => void;
+  onClassDelete: (classToDelete: ScheduledClass) => void;
+  onClassAdd: (newClass: ScheduledClass) => void;
+  customTeachers?: CustomTeacher[];
+  isDarkMode?: boolean;
 }
 
 const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
-  location,
   csvData,
   scheduledClasses,
-  onSlotClick,
-  onClassEdit,
-  lockedClasses = new Set(),
-  theme,
-  allowRestrictedScheduling
+  onClassUpdate,
+  onClassDelete,
+  onClassAdd,
+  customTeachers = [],
+  isDarkMode = false
 }) => {
-  const [showFilters, setShowFilters] = useState(false);
-  const [showRestrictedSlots, setShowRestrictedSlots] = useState(false);
-  const [dateRange, setDateRange] = useState('all');
-  const [minParticipants, setMinParticipants] = useState(0);
-  const [selectedDay, setSelectedDay] = useState<string | null>(null);
-  const [showDayView, setShowDayView] = useState(false);
-  const [currentSlotIndex, setCurrentSlotIndex] = useState<Record<string, number>>({});
-  const [hoveredSlot, setHoveredSlot] = useState<{ day: string; time: string } | null>(null);
-  const [slotRecommendations, setSlotRecommendations] = useState<AIRecommendation[]>([]);
-  const [loadingRecommendations, setLoadingRecommendations] = useState(false);
-
-  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  
-  // Enhanced time slots with ALL 15-minute intervals
-  const availableTimeSlots = ALL_TIME_SLOTS.filter(time => {
-    const hour = parseInt(time.split(':')[0]);
-    return (hour >= 7 && hour <= 12) || (hour >= 16 && hour <= 20);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedDay, setSelectedDay] = useState('');
+  const [selectedTime, setSelectedTime] = useState('');
+  const [selectedLocation, setSelectedLocation] = useState('');
+  const [editingClass, setEditingClass] = useState<ScheduledClass | null>(null);
+  const [isDayViewOpen, setIsDayViewOpen] = useState(false);
+  const [isSmartOptimizerOpen, setIsSmartOptimizerOpen] = useState(false);
+  const [isEnhancedOptimizerOpen, setIsEnhancedOptimizerOpen] = useState(false);
+  const [optimizationSuggestions, setOptimizationSuggestions] = useState<OptimizationSuggestion[]>([]);
+  const [topClasses, setTopClasses] = useState<TopPerformingClass[]>([]);
+  const [filterOptions, setFilterOptions] = useState({
+    showTopPerformers: false,
+    showPrivateClasses: false,
+    showRegularClasses: true,
+    selectedTeacher: '',
+    selectedClassFormat: ''
   });
-  
-  const restrictedTimeSlots = getRestrictedTimeSlots();
-  
-  // Conditionally include restricted slots based on toggle
-  const allTimeSlots = showRestrictedSlots 
-    ? [...availableTimeSlots, ...restrictedTimeSlots].sort()
-    : availableTimeSlots;
+  const [showFilters, setShowFilters] = useState(false);
 
-  const priorityTeachers = ['Anisha', 'Vivaran', 'Mrigakshi', 'Pranjali', 'Atulan', 'Cauveri', 'Rohan'];
-  const timeSlotsWithData = getTimeSlotsWithData(csvData, location);
-
-  // Load recommendations for hovered slot
   useEffect(() => {
-    if (hoveredSlot) {
-      loadSlotRecommendations(hoveredSlot.day, hoveredSlot.time);
-    }
-  }, [hoveredSlot]);
+    const fetchData = async () => {
+      const today = new Date();
+      const dayOfWeek = today.toLocaleDateString('en-US', { weekday: 'long' });
+      const time = today.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+      const location = 'Kwality House, Kemps Corner';
 
-  const loadSlotRecommendations = async (day: string, time: string) => {
-    setLoadingRecommendations(true);
-    try {
-      const recommendations = await aiService.generateRecommendations(csvData, day, time, location);
-      setSlotRecommendations(recommendations.slice(0, 5)); // Top 5 recommendations
-    } catch (error) {
-      console.error('Failed to load slot recommendations:', error);
-      // Fallback to best historical recommendation
-      const bestRecommendation = getBestSlotRecommendation(csvData, location, day, time);
-      if (bestRecommendation) {
-        setSlotRecommendations([{
-          classFormat: bestRecommendation.classFormat,
-          teacher: bestRecommendation.teacher,
-          reasoning: `Best historical performance: ${bestRecommendation.avgCheckedIn.toFixed(1)} avg check-ins`,
-          confidence: 0.8,
-          expectedParticipants: Math.round(bestRecommendation.avgCheckedIn),
-          expectedRevenue: Math.round(bestRecommendation.avgCheckedIn * 500),
-          priority: 5
-        }]);
-      } else {
-        setSlotRecommendations([]);
-      }
-    } finally {
-      setLoadingRecommendations(false);
-    }
-  };
+      const recommendations = await aiService.generateRecommendations(csvData, dayOfWeek, time, location);
+      console.log('AI Recommendations:', recommendations);
 
-  const handleDayClick = (day: string) => {
-    setSelectedDay(day);
-    setShowDayView(true);
-  };
+      const topClassesData = csvData.reduce((acc: any, item) => {
+        const key = `${item.cleanedClass}-${item.location}-${item.dayOfWeek}-${item.classTime}-${item.teacherName}`;
+        if (!acc[key]) {
+          acc[key] = {
+            classFormat: item.cleanedClass,
+            location: item.location,
+            day: item.dayOfWeek,
+            time: item.classTime,
+            teacher: item.teacherName,
+            avgParticipants: 0,
+            avgRevenue: 0,
+            frequency: 0,
+            totalParticipants: 0,
+            totalRevenue: 0
+          };
+        }
+        acc[key].totalParticipants += item.participants;
+        acc[key].totalRevenue += item.totalRevenue;
+        acc[key].frequency++;
+        return acc;
+      }, {});
 
-  const handleClassClick = (e: React.MouseEvent, scheduledClass: ScheduledClass) => {
-    e.stopPropagation();
-    onClassEdit(scheduledClass);
-  };
+      const topClassesArray = Object.values(topClassesData).map((item: any) => ({
+        ...item,
+        avgParticipants: item.totalParticipants / item.frequency,
+        avgRevenue: item.totalRevenue / item.frequency
+      })).sort((a: any, b: any) => b.avgParticipants - a.avgParticipants).slice(0, 5);
 
-  const handleSlotClickInternal = (day: string, time: string, location: string) => {
-    const isRestricted = isTimeRestricted(time, day);
-    
-    if (isRestricted && !allowRestrictedScheduling) {
-      alert('Scheduling in restricted time slots is disabled. Enable it in Studio Settings to schedule private classes during this time.');
-      return;
-    }
-    
-    onSlotClick(day, time, location);
-  };
-
-  const handleRecommendationClick = (recommendation: AIRecommendation, day: string, time: string) => {
-    // Create a scheduled class from the recommendation and trigger scheduling
-    const teacherParts = recommendation.teacher.split(' ');
-    const scheduledClass = {
-      id: `rec-${Date.now()}`,
-      day,
-      time,
-      location,
-      classFormat: recommendation.classFormat,
-      teacherFirstName: teacherParts[0] || '',
-      teacherLastName: teacherParts.slice(1).join(' ') || '',
-      duration: '1', // Default duration
-      participants: recommendation.expectedParticipants,
-      revenue: recommendation.expectedRevenue,
-      isTopPerformer: recommendation.priority >= 4
+      setTopClasses(topClassesArray);
     };
-    
-    // Trigger the scheduling directly
-    onSlotClick(day, time, location);
+
+    fetchData();
+  }, [csvData]);
+
+  const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const timesOfDay = [
+    '06:00', '06:30', '07:00', '07:30', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
+    '11:00', '11:30', '12:00', '12:30', '17:00', '17:30', '18:00', '18:30', '19:00', '19:30',
+    '20:00', '20:30', '21:00'
+  ];
+
+  const locations = ['Kwality House, Kemps Corner', 'Supreme HQ, Bandra', 'Kenkere House'];
+
+  const handleSlotClick = (day: string, time: string, location: string) => {
+    setSelectedDay(day);
+    setSelectedTime(time);
+    setSelectedLocation(location);
+    setEditingClass(null);
+    setIsModalOpen(true);
   };
 
-  const navigateSlot = (day: string, time: string, direction: 'prev' | 'next') => {
-    const slotKey = `${day}-${time}`;
-    const classes = getScheduledClasses(day, time);
-    const currentIndex = currentSlotIndex[slotKey] || 0;
-    
-    if (direction === 'prev') {
-      setCurrentSlotIndex(prev => ({
-        ...prev,
-        [slotKey]: Math.max(0, currentIndex - 1)
-      }));
+  const handleClassClick = (cls: ScheduledClass) => {
+    setSelectedDay(cls.day);
+    setSelectedTime(cls.time);
+    setSelectedLocation(cls.location);
+    setEditingClass(cls);
+    setIsModalOpen(true);
+  };
+
+  const handleClassSave = (savedClass: ScheduledClass) => {
+    if (editingClass) {
+      onClassUpdate(savedClass);
     } else {
-      setCurrentSlotIndex(prev => ({
-        ...prev,
-        [slotKey]: Math.min(classes.length - 1, currentIndex + 1)
-      }));
+      onClassAdd(savedClass);
     }
+    setIsModalOpen(false);
+    setEditingClass(null);
   };
 
-  const getHistoricData = (day: string, time: string) => {
-    // Only show historic data for time slots that actually have data
-    if (!timeSlotsWithData.has(time)) return null;
-
-    return getDetailedHistoricAnalysis(csvData, location, day, time);
+  const handleClassDelete = (classToDelete: ScheduledClass) => {
+    onClassDelete(classToDelete);
+    setIsModalOpen(false);
+    setEditingClass(null);
   };
 
-  const getScheduledClasses = (day: string, time: string) => {
-    return getClassesAtTimeSlot(scheduledClasses, day, time, location);
+  const handleDayView = (day: string, location: string) => {
+    setSelectedDay(day);
+    setSelectedLocation(location);
+    setIsDayViewOpen(true);
   };
 
-  const getTeacherAvatar = (teacherName: string) => {
-    const initials = teacherName.split(' ').map(n => n[0]).join('').toUpperCase();
-    const isPriority = priorityTeachers.some(name => teacherName.includes(name));
-    
-    return (
-      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white font-bold text-xs ${
-        isPriority ? 'bg-gradient-to-r from-yellow-500 to-orange-500' :
-        'bg-gradient-to-r from-purple-500 to-pink-500'
-      }`}>
-        {initials}
-      </div>
-    );
+  const handleOptimize = async () => {
+    const suggestions = await aiService.optimizeSchedule(csvData, scheduledClasses);
+    setOptimizationSuggestions(suggestions);
+    setIsSmartOptimizerOpen(true);
   };
 
-  const renderCell = (day: string, time: string) => {
-    const historicData = getHistoricData(day, time);
-    const scheduledClassesInSlot = getScheduledClasses(day, time);
-    const slotKey = `${day}-${time}`;
-    const currentIndex = currentSlotIndex[slotKey] || 0;
-    const currentClass = scheduledClassesInSlot[currentIndex];
-    const isRestricted = isTimeRestricted(time, day);
-    const hasPrivateClass = scheduledClassesInSlot.some(cls => cls.isPrivate);
-    const hasHistorical = hasHistoricalData(csvData, location, day, time);
-    const isHovered = hoveredSlot?.day === day && hoveredSlot?.time === time;
-    
-    // Apply filters
-    if (historicData && historicData.avgAttendanceWithEmpty < minParticipants) {
-      return (
-        <div
-          key={`${day}-${time}`}
-          className={`relative h-32 border cursor-pointer transition-all duration-300 ${theme.card}`}
-        />
-      );
+  const handleApplySuggestion = (suggestion: OptimizationSuggestion) => {
+    if (suggestion.type === 'teacher_change' && suggestion.originalClass && suggestion.suggestedClass) {
+      onClassUpdate(suggestion.suggestedClass);
     }
-    
-    return (
-      <div
-        key={`${day}-${time}`}
-        onClick={() => {
-          if (scheduledClassesInSlot.length === 0) {
-            handleSlotClickInternal(day, time, location);
-          }
-        }}
-        onMouseEnter={() => {
-          if (scheduledClassesInSlot.length === 0 && hasHistorical) {
-            setHoveredSlot({ day, time });
-          }
-        }}
-        onMouseLeave={() => {
-          setHoveredSlot(null);
-          setSlotRecommendations([]);
-        }}
-        className={`relative h-32 border cursor-pointer transition-all duration-300 hover:shadow-lg hover:scale-[1.02] group ${
-          scheduledClassesInSlot.length > 0
-            ? `bg-gradient-to-br from-green-400/20 to-emerald-500/20 hover:from-green-400/30 hover:to-emerald-500/30 border-green-400/50`
-            : isRestricted
-              ? `bg-gradient-to-br from-red-400/10 to-orange-500/10 hover:from-red-400/20 hover:to-orange-500/20 border-red-400/30`
-              : historicData 
-                ? `bg-gradient-to-br from-blue-400/10 to-cyan-500/10 hover:from-blue-400/20 hover:to-cyan-500/20 border-blue-400/30` 
-                : `${theme.card} hover:bg-gray-700/50`
-        }`}
-      >
-        {/* Restricted Time Indicator */}
-        {isRestricted && scheduledClassesInSlot.length === 0 && (
-          <div className="absolute top-1 left-1 z-10">
-            <div className="flex items-center px-2 py-1 rounded text-xs bg-red-500/20 text-red-300">
-              <Shield className="h-3 w-3 mr-1" />
-              <span>Private Only</span>
-            </div>
-          </div>
-        )}
-
-        {scheduledClassesInSlot.length > 0 && (
-          <div className="absolute inset-0 p-2 overflow-hidden">
-            {/* Navigation for multiple classes */}
-            {scheduledClassesInSlot.length > 1 && (
-              <div className="absolute top-1 right-1 flex space-x-1 z-10">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigateSlot(day, time, 'prev');
-                  }}
-                  disabled={currentIndex === 0}
-                  className="p-1 rounded hover:bg-gray-700/70 disabled:opacity-50 bg-gray-800/70 text-white"
-                >
-                  <ChevronLeft className="h-3 w-3" />
-                </button>
-                <span className="px-2 py-1 text-xs rounded bg-gray-800/70 text-white">
-                  {currentIndex + 1}/{scheduledClassesInSlot.length}
-                </span>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigateSlot(day, time, 'next');
-                  }}
-                  disabled={currentIndex === scheduledClassesInSlot.length - 1}
-                  className="p-1 rounded hover:bg-gray-700/70 disabled:opacity-50 bg-gray-800/70 text-white"
-                >
-                  <ChevronRight className="h-3 w-3" />
-                </button>
-              </div>
-            )}
-
-            {/* Current class display */}
-            {currentClass && (
-              <div
-                onClick={(e) => handleClassClick(e, currentClass)}
-                className={`p-2 rounded-lg border-l-4 cursor-pointer hover:shadow-md transition-all duration-200 h-full ${
-                  currentClass.isTopPerformer 
-                    ? 'bg-yellow-400/20 border-yellow-400 hover:bg-yellow-400/30'
-                    : currentClass.isPrivate 
-                    ? 'bg-purple-400/20 border-purple-400 hover:bg-purple-400/30'
-                    : 'bg-green-400/20 border-green-400 hover:bg-green-400/30'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <div className={`text-xs font-semibold truncate flex-1 ${
-                    currentClass.isTopPerformer 
-                      ? 'text-yellow-200'
-                      : currentClass.isPrivate 
-                      ? 'text-purple-200'
-                      : 'text-green-200'
-                  }`}>
-                    {currentClass.classFormat}
-                  </div>
-                  <div className="flex items-center space-x-1 ml-1">
-                    {currentClass.isTopPerformer && <Star className="h-3 w-3 text-yellow-400" />}
-                    {lockedClasses.has(currentClass.id) && <Lock className="h-3 w-3 text-red-400" />}
-                    {currentClass.isPrivate && <Shield className="h-3 w-3 text-purple-400" />}
-                    {currentClass.isHosted && <Users className="h-3 w-3 text-blue-400" />}
-                    {currentClass.isPriorityClass && <Target className="h-3 w-3 text-green-400" />}
-                    <Edit className="h-3 w-3 text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                </div>
-                
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center">
-                    {getTeacherAvatar(`${currentClass.teacherFirstName} ${currentClass.teacherLastName}`)}
-                    <div className={`ml-2 text-xs truncate ${
-                      currentClass.isTopPerformer 
-                        ? 'text-yellow-300'
-                        : currentClass.isPrivate 
-                        ? 'text-purple-300'
-                        : 'text-green-300'
-                    }`}>
-                      {currentClass.isHosted ? 'Hosted' : currentClass.teacherFirstName}
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-300">
-                    {parseFloat(currentClass.duration) * 60}min
-                  </div>
-                </div>
-                
-                {currentClass.participants && (
-                  <div className="text-xs flex items-center text-gray-300">
-                    <Users className="h-3 w-3 mr-1" />
-                    {currentClass.participants}
-                  </div>
-                )}
-
-                {currentClass.coverTeacher && (
-                  <div className="text-xs text-gray-400 mt-1">
-                    Cover: {currentClass.coverTeacher.split(' ')[0]}
-                  </div>
-                )}
-
-                {currentClass.clientDetails && (
-                  <div className="text-xs text-blue-400 mt-1">
-                    Client: {currentClass.clientDetails}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-        
-        {/* Show restricted time message for empty restricted slots */}
-        {isRestricted && scheduledClassesInSlot.length === 0 && (
-          <div className="absolute inset-0 p-2 flex items-center justify-center">
-            <div className="text-center">
-              <AlertTriangle className="h-4 w-4 mx-auto mb-1 text-red-400" />
-              <div className="text-xs font-medium text-red-300">Restricted</div>
-              <div className="text-xs text-red-400">Private Only</div>
-            </div>
-          </div>
-        )}
-        
-        {/* Show historic data for available slots */}
-        {historicData && scheduledClassesInSlot.length === 0 && !isRestricted && (
-          <div className="absolute inset-0 p-2 flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-xs font-medium text-blue-300">
-                {historicData.totalClasses} classes
-              </div>
-              <div className="text-xs text-gray-400">
-                {historicData.avgAttendanceWithEmpty.toFixed(1)} avg
-              </div>
-              <div className="flex justify-center mt-1">
-                <div className="w-2 h-2 rounded-full opacity-60 bg-blue-400"></div>
-              </div>
-            </div>
-          </div>
-        )}
-        
-        {/* Enhanced Hover Tooltip with Top 5 AI Recommendations */}
-        {(historicData || scheduledClassesInSlot.length > 0 || isRestricted || (isHovered && hasHistorical)) && (
-          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-96 rounded-xl p-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-20 shadow-2xl bg-gray-900 text-white border border-gray-700">
-            {scheduledClassesInSlot.length > 0 ? (
-              <div>
-                <div className="font-semibold mb-3 flex items-center text-white">
-                  <Zap className="h-4 w-4 mr-2 text-blue-400" />
-                  Scheduled Classes ({scheduledClassesInSlot.length})
-                </div>
-                
-                <div className="space-y-3">
-                  {scheduledClassesInSlot.map((cls, index) => (
-                    <div key={cls.id} className="p-3 rounded-lg bg-gray-800">
-                      <div className="grid grid-cols-2 gap-3 mb-2">
-                        <div>
-                          <div className="text-gray-400">Class:</div>
-                          <div className="font-medium text-white">{cls.classFormat}</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400">Duration:</div>
-                          <div className="font-medium text-white">{parseFloat(cls.duration) * 60} mins</div>
-                        </div>
-                        <div>
-                          <div className="text-gray-400">Teacher:</div>
-                          <div className="font-medium flex items-center text-white">
-                            {getTeacherAvatar(`${cls.teacherFirstName} ${cls.teacherLastName}`)}
-                            <span className="ml-2">
-                              {cls.isHosted ? 'Hosted Class' : `${cls.teacherFirstName} ${cls.teacherLastName}`}
-                            </span>
-                          </div>
-                        </div>
-                        {cls.participants && (
-                          <div>
-                            <div className="text-gray-400">Expected:</div>
-                            <div className="text-green-400 font-medium">{cls.participants} participants</div>
-                          </div>
-                        )}
-                      </div>
-
-                      {cls.isTopPerformer && (
-                        <div className="p-2 rounded-lg bg-yellow-500/20">
-                          <div className="text-xs font-medium flex items-center text-yellow-300">
-                            <Award className="h-3 w-3 mr-1" />
-                            Top performing class
-                          </div>
-                        </div>
-                      )}
-
-                      {cls.isPrivate && (
-                        <div className="p-2 rounded-lg mt-2 bg-purple-500/20">
-                          <div className="text-xs font-medium flex items-center text-purple-300">
-                            <Shield className="h-3 w-3 mr-1" />
-                            Private session
-                          </div>
-                        </div>
-                      )}
-
-                      {cls.isHosted && cls.clientDetails && (
-                        <div className="p-2 rounded-lg mt-2 bg-blue-500/20">
-                          <div className="text-xs font-medium text-blue-300">
-                            Client: {cls.clientDetails}
-                          </div>
-                        </div>
-                      )}
-
-                      {cls.coverTeacher && (
-                        <div className="p-2 rounded-lg mt-2 bg-blue-500/20">
-                          <div className="text-xs font-medium text-blue-300">
-                            Cover Teacher: {cls.coverTeacher}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : isRestricted ? (
-              <div>
-                <div className="font-semibold mb-3 flex items-center text-white">
-                  <AlertTriangle className="h-4 w-4 mr-2 text-red-400" />
-                  Restricted Time Slot
-                </div>
-                <div className="p-3 rounded-lg bg-red-500/20">
-                  <div className="text-sm mb-2 text-red-300">
-                    <strong>12:00 PM - 5:00 PM Restriction</strong>
-                  </div>
-                  <div className="text-xs space-y-1 text-red-200">
-                    <div>• Only private classes allowed during this time</div>
-                    <div>• Regular group classes are restricted</div>
-                    {allowRestrictedScheduling ? (
-                      <div>• Click to schedule a private session</div>
-                    ) : (
-                      <div>• Enable in Studio Settings to schedule here</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : isHovered && hasHistorical ? (
-              <div>
-                <div className="font-semibold mb-3 flex items-center text-white">
-                  <Target className="h-4 w-4 mr-2 text-green-400" />
-                  Top 5 AI Recommendations for {day} {time}
-                </div>
-                
-                {loadingRecommendations ? (
-                  <div className="text-center py-4">
-                    <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-400 border-t-transparent mx-auto mb-2"></div>
-                    <div className="text-sm text-gray-400">Loading recommendations...</div>
-                  </div>
-                ) : slotRecommendations.length > 0 ? (
-                  <div className="space-y-2 pointer-events-auto">
-                    {slotRecommendations.map((rec, index) => (
-                      <div
-                        key={index}
-                        onClick={() => handleRecommendationClick(rec, day, time)}
-                        className="p-3 rounded-lg bg-gray-800 hover:bg-gray-700 cursor-pointer transition-colors border border-gray-600 hover:border-green-500"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="font-medium text-white">{rec.classFormat}</div>
-                          <div className="flex items-center space-x-2">
-                            <div className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              index === 0 ? 'bg-yellow-500/20 text-yellow-300' :
-                              index === 1 ? 'bg-gray-500/20 text-gray-300' :
-                              index === 2 ? 'bg-orange-500/20 text-orange-300' :
-                              'bg-blue-500/20 text-blue-300'
-                            }`}>
-                              #{index + 1}
-                            </div>
-                            <Plus className="h-4 w-4 text-green-400" />
-                          </div>
-                        </div>
-                        <div className="text-sm text-gray-300 mb-2">
-                          <strong>Teacher:</strong> {rec.teacher}
-                        </div>
-                        <div className="text-xs text-gray-400 mb-2">
-                          {rec.reasoning}
-                        </div>
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-green-400">{rec.expectedParticipants} participants</span>
-                          <span className="text-blue-400">₹{rec.expectedRevenue}</span>
-                        </div>
-                      </div>
-                    ))}
-                    <div className="text-xs text-center text-gray-400 mt-2">
-                      Click any recommendation to schedule instantly
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center py-4">
-                    <div className="text-sm text-gray-400">No recommendations available for this slot</div>
-                  </div>
-                )}
-              </div>
-            ) : historicData ? (
-              <div>
-                <div className="font-semibold mb-3 flex items-center text-white">
-                  <TrendingUp className="h-4 w-4 mr-2 text-blue-400" />
-                  Enhanced Historic Performance Analysis
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <div>
-                    <div className="text-gray-400">Total Classes:</div>
-                    <div className="font-medium text-white">{historicData.totalClasses}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400">Avg Check-ins:</div>
-                    <div className="text-green-400 font-medium">{historicData.avgAttendanceWithEmpty.toFixed(1)}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400">Total Check-ins:</div>
-                    <div className="text-blue-400 font-medium">{historicData.totalCheckedIn}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400">Empty Classes:</div>
-                    <div className="text-red-400 font-medium">{historicData.emptyClasses}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400">Total Revenue:</div>
-                    <div className="text-green-400 font-medium">₹{Math.round(historicData.totalRevenue / 1000)}K</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400">Revenue/Class:</div>
-                    <div className="text-green-400 font-medium">₹{Math.round(historicData.revenuePerClass)}</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400">Fill Rate:</div>
-                    <div className="text-blue-400 font-medium">{historicData.avgFillRate.toFixed(1)}%</div>
-                  </div>
-                  <div>
-                    <div className="text-gray-400">Adjusted Score:</div>
-                    <div className="text-purple-400 font-medium">{historicData.adjustedScore.toFixed(2)}</div>
-                  </div>
-                </div>
-
-                <div className="space-y-2 mb-4">
-                  <div className="p-2 rounded-lg bg-blue-500/20">
-                    <div className="text-xs font-medium mb-1 text-blue-300">Top 3 Teacher Recommendations:</div>
-                    {historicData.topTeacherRecommendations.map((teacher, index) => (
-                      <div key={index} className="text-xs text-blue-200">
-                        {index + 1}. {teacher.teacher} (Score: {teacher.weightedAvg}, {teacher.classCount} classes)
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                
-                <div className="p-2 rounded-lg bg-green-500/20">
-                  <div className="text-xs flex items-center text-green-300">
-                    <Target className="h-3 w-3 mr-1" />
-                    Click to schedule a class for this time slot
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        )}
-      </div>
-    );
+    setOptimizationSuggestions(optimizationSuggestions.filter(s => s !== suggestion));
   };
 
-  // Calculate summary stats for this location
-  const locationClasses = scheduledClasses.filter(cls => cls.location === location);
-  const totalClasses = locationClasses.length;
-  const topPerformers = locationClasses.filter(cls => cls.isTopPerformer).length;
-  const privateClasses = locationClasses.filter(cls => cls.isPrivate).length;
-  const hostedClasses = locationClasses.filter(cls => cls.isHosted).length;
-  const totalParticipants = locationClasses.reduce((sum, cls) => sum + (cls.participants || 0), 0);
-  const avgParticipants = totalClasses > 0 ? parseFloat((totalParticipants / totalClasses).toFixed(1)) : 0;
+  const handleExportCSV = () => {
+    exportScheduleToCSV(scheduledClasses);
+  };
 
-  // Get class mix by day
-  const classMixByDay = days.reduce((acc, day) => {
-    const dayClasses = locationClasses.filter(cls => cls.day === day);
-    acc[day] = dayClasses.reduce((formatAcc, cls) => {
-      formatAcc[cls.classFormat] = (formatAcc[cls.classFormat] || 0) + 1;
-      return formatAcc;
-    }, {} as Record<string, number>);
-    return acc;
-  }, {} as Record<string, Record<string, number>>);
+  const handleExportPDF = () => {
+    exportScheduleToPDF(scheduledClasses);
+  };
+
+  const toggleFilter = (filterKey: string) => {
+    setFilterOptions(prev => ({ ...prev, [filterKey]: !prev[filterKey] }));
+  };
+
+  const filteredClasses = scheduledClasses.filter(cls => {
+    if (filterOptions.showTopPerformers && !cls.isTopPerformer) return false;
+    if (filterOptions.showPrivateClasses && !cls.isPrivate) return false;
+    if (!filterOptions.showRegularClasses && cls.isPrivate) return false;
+    if (filterOptions.selectedTeacher && `${cls.teacherFirstName} ${cls.teacherLastName}` !== filterOptions.selectedTeacher) return false;
+    if (filterOptions.selectedClassFormat && cls.classFormat !== filterOptions.selectedClassFormat) return false;
+    return true;
+  });
 
   return (
-    <>
-      <div className={`backdrop-blur-sm rounded-2xl shadow-2xl overflow-hidden border ${theme.card}`}>
-        <div className={`p-6 border-b bg-gradient-to-r ${theme.secondary}/30`}>
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className={`text-2xl font-bold ${theme.text}`}>{location}</h2>
-              <p className={theme.textSecondary}>Enhanced Weekly Schedule with AI recommendations on hover</p>
-            </div>
-            
-            {/* Location Summary Stats */}
-            <div className="grid grid-cols-5 gap-4 text-center">
-              <div className={`p-3 rounded-lg border bg-blue-500/20 border-blue-500/30`}>
-                <div className={`text-lg font-bold ${theme.text}`}>{totalClasses}</div>
-                <div className="text-xs text-blue-300">Total Classes</div>
-              </div>
-              <div className={`p-3 rounded-lg border bg-yellow-500/20 border-yellow-500/30`}>
-                <div className={`text-lg font-bold ${theme.text}`}>{topPerformers}</div>
-                <div className="text-xs text-yellow-300">Top Performers</div>
-              </div>
-              <div className={`p-3 rounded-lg border bg-purple-500/20 border-purple-500/30`}>
-                <div className={`text-lg font-bold ${theme.text}`}>{privateClasses}</div>
-                <div className="text-xs text-purple-300">Private Classes</div>
-              </div>
-              <div className={`p-3 rounded-lg border bg-indigo-500/20 border-indigo-500/30`}>
-                <div className={`text-lg font-bold ${theme.text}`}>{hostedClasses}</div>
-                <div className="text-xs text-indigo-300">Hosted Classes</div>
-              </div>
-              <div className={`p-3 rounded-lg border bg-green-500/20 border-green-500/30`}>
-                <div className={`text-lg font-bold ${theme.text}`}>{avgParticipants.toFixed(1)}</div>
-                <div className="text-xs text-green-300">Avg Participants</div>
-              </div>
-            </div>
+    <div className={`min-h-screen transition-colors duration-300 ${isDarkMode ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-900'}`}>
+      <div className={`p-6 border-b ${isDarkMode ? 'border-gray-800' : 'border-gray-200'}`}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center">
+            <Calendar className="h-6 w-6 mr-2 text-purple-500" />
+            <h1 className="text-2xl font-semibold">Weekly Schedule</h1>
           </div>
-
-          {/* Class Mix Display */}
-          <div className="mb-4">
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={() => setShowFilters(!showFilters)}
-                className={`flex items-center px-4 py-2 rounded-lg transition-colors ${theme.card} hover:scale-105`}
-              >
-                <Filter className={`h-4 w-4 mr-2 ${theme.accent}`} />
-                <span className={theme.text}>Class Mix & Filters</span>
-                {showFilters ? <ChevronUp className="h-4 w-4 ml-2" /> : <ChevronDown className="h-4 w-4 ml-2" />}
-              </button>
-
-              <button
-                onClick={() => setShowRestrictedSlots(!showRestrictedSlots)}
-                className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
-                  showRestrictedSlots
-                    ? 'bg-red-600/50 hover:bg-red-500/50 text-red-200'
-                    : `${theme.card} ${theme.textSecondary}`
-                }`}
-              >
-                {showRestrictedSlots ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
-                <span>{showRestrictedSlots ? 'Hide' : 'Show'} Restricted Slots</span>
-                <span className={`ml-2 px-2 py-1 rounded-full text-xs bg-gray-600 text-gray-300`}>
-                  {restrictedTimeSlots.length}
-                </span>
-              </button>
-            </div>
-            
-            {showFilters && (
-              <div className={`mt-4 p-4 rounded-lg border ${theme.card}`}>
-                {/* Class Mix by Day */}
-                <div className="mb-6">
-                  <h4 className={`text-sm font-medium ${theme.textSecondary} mb-3`}>Class Mix by Day</h4>
-                  <div className="grid grid-cols-7 gap-2">
-                    {days.map(day => (
-                      <div key={day} className={`p-3 rounded-lg border ${theme.card}`}>
-                        <div className={`text-sm font-medium ${theme.text} mb-2`}>{day.slice(0, 3)}</div>
-                        <div className="space-y-1">
-                          {Object.entries(classMixByDay[day] || {}).map(([format, count]) => (
-                            <div key={format} className="text-xs">
-                              <span className={theme.textSecondary}>{format.split(' ').slice(-1)[0]}:</span>
-                              <span className={`ml-1 ${theme.text}`}>{count}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Filters */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className={`block text-sm font-medium ${theme.textSecondary} mb-2`}>
-                      Date Range
-                    </label>
-                    <select
-                      value={dateRange}
-                      onChange={(e) => setDateRange(e.target.value)}
-                      className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${theme.card} ${theme.text}`}
-                    >
-                      <option value="all">All Time</option>
-                      <option value="last30">Last 30 Days</option>
-                      <option value="last90">Last 90 Days</option>
-                      <option value="last180">Last 6 Months</option>
-                      <option value="lastyear">Last Year</option>
-                    </select>
-                  </div>
-                  
-                  <div>
-                    <label className={`block text-sm font-medium ${theme.textSecondary} mb-2`}>
-                      Min Check-ins
-                    </label>
-                    <input
-                      type="number"
-                      value={minParticipants}
-                      onChange={(e) => setMinParticipants(parseInt(e.target.value) || 0)}
-                      className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${theme.card} ${theme.text}`}
-                      placeholder="0"
-                      min="0"
-                    />
-                  </div>
-                  
-                  <div className="flex items-end">
-                    <button
-                      onClick={() => {
-                        setDateRange('all');
-                        setMinParticipants(0);
-                      }}
-                      className={`px-4 py-2 rounded-lg transition-colors ${theme.button}`}
-                    >
-                      Reset Filters
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          <div className="flex items-center space-x-6 text-sm">
-            <div className="flex items-center">
-              <div className="w-3 h-3 bg-gradient-to-r from-yellow-400 to-amber-500 rounded mr-2"></div>
-              <span className={theme.textSecondary}>Top Performer</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-3 h-3 bg-gradient-to-r from-purple-400 to-pink-500 rounded mr-2"></div>
-              <span className={theme.textSecondary}>Private Class</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-3 h-3 bg-gradient-to-r from-indigo-400 to-blue-500 rounded mr-2"></div>
-              <span className={theme.textSecondary}>Hosted Class</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-3 h-3 bg-gradient-to-r from-green-400 to-emerald-500 rounded mr-2"></div>
-              <span className={theme.textSecondary}>Regular Class</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-3 h-3 bg-gradient-to-r from-red-400 to-orange-500 rounded mr-2"></div>
-              <span className={theme.textSecondary}>Restricted (Private Only)</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-3 h-3 rounded mr-2 bg-gradient-to-r from-blue-400 to-cyan-500"></div>
-              <span className={theme.textSecondary}>Historic Data (Hover for AI)</span>
-            </div>
-            <div className="flex items-center">
-              <div className={`w-3 h-3 rounded mr-2 bg-gray-600`}></div>
-              <span className={theme.textSecondary}>Available</span>
-            </div>
+          <div className="space-x-2">
+            <button
+              onClick={handleExportCSV}
+              className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+            >
+              <Download className="h-4 w-4 mr-2 inline" />
+              Export CSV
+            </button>
+            <button
+              onClick={handleExportPDF}
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+            >
+              <Download className="h-4 w-4 mr-2 inline" />
+              Export PDF
+            </button>
+            <button
+              onClick={handleOptimize}
+              className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors"
+            >
+              <Zap className="h-4 w-4 mr-2 inline" />
+              Smart Optimize
+            </button>
+            <button
+              onClick={() => setIsEnhancedOptimizerOpen(true)}
+              className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
+            >
+              <Brain className="h-4 w-4 mr-2 inline" />
+              Enhanced Optimize
+            </button>
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+            >
+              <Filter className="h-4 w-4 mr-2 inline" />
+              Filters
+            </button>
           </div>
         </div>
-        
-        <div className="overflow-x-auto">
-          <div className="min-w-full">
-            {/* Header */}
-            <div className={`grid grid-cols-8 ${theme.card}`}>
-              <div className={`p-4 text-sm font-semibold ${theme.textSecondary} border-b`}>
-                <Clock className="h-4 w-4 inline mr-2" />
-                Time
+
+        {showFilters && (
+          <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'} mb-4`}>
+            <h3 className="text-lg font-semibold mb-2">Filter Options</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label className="inline-flex items-center">
+                  <input
+                    type="checkbox"
+                    className="form-checkbox h-5 w-5 text-purple-500"
+                    checked={filterOptions.showTopPerformers}
+                    onChange={() => toggleFilter('showTopPerformers')}
+                  />
+                  <span className="ml-2">Show Top Performers</span>
+                </label>
               </div>
-              {days.map(day => (
-                <div 
-                  key={day} 
-                  onClick={() => handleDayClick(day)}
-                  className={`p-4 text-sm font-semibold ${theme.textSecondary} border-b text-center cursor-pointer transition-colors group hover:bg-gray-700/70`}
+              <div>
+                <label className="inline-flex items-center">
+                  <input
+                    type="checkbox"
+                    className="form-checkbox h-5 w-5 text-purple-500"
+                    checked={filterOptions.showPrivateClasses}
+                    onChange={() => toggleFilter('showPrivateClasses')}
+                  />
+                  <span className="ml-2">Show Private Classes</span>
+                </label>
+              </div>
+              <div>
+                <label className="inline-flex items-center">
+                  <input
+                    type="checkbox"
+                    className="form-checkbox h-5 w-5 text-purple-500"
+                    checked={filterOptions.showRegularClasses}
+                    onChange={() => toggleFilter('showRegularClasses')}
+                  />
+                  <span className="ml-2">Show Regular Classes</span>
+                </label>
+              </div>
+              <div>
+                <label htmlFor="teacherFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Filter by Teacher:
+                </label>
+                <select
+                  id="teacherFilter"
+                  className={`mt-1 block w-full py-2 px-3 border rounded-md shadow-sm focus:outline-none focus:ring-purple-500 focus:border-purple-500 sm:text-sm ${isDarkMode ? 'bg-gray-700 text-white border-gray-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                  value={filterOptions.selectedTeacher}
+                  onChange={(e) => setFilterOptions(prev => ({ ...prev, selectedTeacher: e.target.value }))}
                 >
-                  <div className="flex items-center justify-center">
-                    <span className={theme.text}>{day}</span>
-                    <Eye className="h-3 w-3 ml-2 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                  <div className={`text-xs ${theme.textSecondary} mt-1`}>
-                    {scheduledClasses.filter(cls => cls.location === location && cls.day === day).length} classes
-                  </div>
-                </div>
-              ))}
-            </div>
-            
-            {/* Time slots - ALL 15-minute intervals */}
-            {allTimeSlots.map(time => (
-              <div key={time} className="grid grid-cols-8 transition-colors hover:bg-gray-700/20">
-                <div className={`p-3 text-sm font-medium ${theme.textSecondary} border-b flex items-center ${theme.card}`}>
-                  <div>
-                    <div className={`font-semibold flex items-center ${theme.text}`}>
-                      <span>{time}</span>
-                      {isTimeRestricted(time, 'Monday') && (
-                        <AlertTriangle className="h-3 w-3 ml-2 text-red-400" />
-                      )}
-                    </div>
-                    <div className={`text-xs ${theme.textSecondary}`}>
-                      {scheduledClasses.filter(cls => cls.location === location && cls.time === time).length} scheduled
-                    </div>
-                  </div>
-                </div>
-                {days.map(day => renderCell(day, time))}
+                  <option value="">All Teachers</option>
+                  {[...new Set(scheduledClasses.map(cls => `${cls.teacherFirstName} ${cls.teacherLastName}`))]
+                    .sort()
+                    .map(teacher => (
+                      <option key={teacher} value={teacher}>{teacher}</option>
+                    ))}
+                </select>
               </div>
-            ))}
+              <div>
+                <label htmlFor="classFormatFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Filter by Class Format:
+                </label>
+                <select
+                  id="classFormatFilter"
+                  className={`mt-1 block w-full py-2 px-3 border rounded-md shadow-sm focus:outline-none focus:ring-purple-500 focus:border-purple-500 sm:text-sm ${isDarkMode ? 'bg-gray-700 text-white border-gray-600' : 'bg-white text-gray-700 border-gray-300'}`}
+                  value={filterOptions.selectedClassFormat}
+                  onChange={(e) => setFilterOptions(prev => ({ ...prev, selectedClassFormat: e.target.value }))}
+                >
+                  <option value="">All Formats</option>
+                  {[...new Set(scheduledClasses.map(cls => cls.classFormat))]
+                    .sort()
+                    .map(format => (
+                      <option key={format} value={format}>{format}</option>
+                    ))}
+                </select>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Day View Modal */}
+      <div className="overflow-x-auto">
+        <table className={`min-w-full divide-y ${isDarkMode ? 'divide-gray-800' : 'divide-gray-200'}`}>
+          <thead className={`${isDarkMode ? 'bg-gray-800' : 'bg-gray-100'} sticky top-0 z-10`}>
+            <tr>
+              <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                Time
+              </th>
+              {daysOfWeek.map(day => (
+                <th key={day} className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                  {day}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className={`${isDarkMode ? 'bg-gray-900' : 'bg-white'} divide-y ${isDarkMode ? 'divide-gray-800' : 'divide-gray-200'}`}>
+            {timesOfDay.map(time => (
+              <tr key={time}>
+                <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {time}
+                </td>
+                {daysOfWeek.map(day => (
+                  <td key={`${day}-${time}`} className="px-6 py-4 whitespace-nowrap text-sm">
+                    {locations.map(location => {
+                      const classesInSlot = filteredClasses.filter(
+                        cls => cls.day === day && cls.time === time && cls.location === location
+                      );
+
+                      if (classesInSlot.length === 0) {
+                        return (
+                          <button
+                            key={location}
+                            onClick={() => handleSlotClick(day, time, location)}
+                            className={`block w-full py-2 px-3 rounded-lg text-left hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}
+                          >
+                            <Plus className="h-4 w-4 inline mr-1" />
+                            <span className="text-xs">{location.split(',')[0]}</span>
+                          </button>
+                        );
+                      }
+
+                      return classesInSlot.map(cls => (
+                        <div key={cls.id} className="mb-1">
+                          <button
+                            onClick={() => handleClassClick(cls)}
+                            className={`block w-full py-2 px-3 rounded-lg text-left hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors ${isDarkMode ? 'text-white' : 'text-gray-900'} ${cls.isTopPerformer ? 'font-semibold' : ''}`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="text-sm">{cls.classFormat}</div>
+                                <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                                  {cls.teacherFirstName} {cls.teacherLastName}
+                                </div>
+                              </div>
+                              {cls.isTopPerformer && <Star className="h-4 w-4 text-yellow-500" />}
+                            </div>
+                          </button>
+                        </div>
+                      ));
+                    })}
+                    {locations.length > 0 && (
+                      <button
+                        onClick={() => handleDayView(day, locations[0])}
+                        className={`block w-full py-1 px-2 rounded-lg text-left hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}
+                      >
+                        <Eye className="h-4 w-4 inline mr-1" />
+                        <span className="text-xs">View All</span>
+                      </button>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Modals */}
+      <ClassModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        csvData={csvData}
+        day={selectedDay}
+        time={selectedTime}
+        location={selectedLocation}
+        existingClass={editingClass}
+        onSave={handleClassSave}
+        onDelete={handleClassDelete}
+        customTeachers={customTeachers}
+        isDarkMode={isDarkMode}
+      />
+
       <DayViewModal
-        isOpen={showDayView}
-        onClose={() => setShowDayView(false)}
-        day={selectedDay || ''}
-        location={location}
+        isOpen={isDayViewOpen}
+        onClose={() => setIsDayViewOpen(false)}
+        day={selectedDay}
+        location={selectedLocation}
         csvData={csvData}
         scheduledClasses={scheduledClasses}
-        onSlotClick={handleSlotClickInternal}
-        theme={theme}
+        onSlotClick={handleSlotClick}
       />
-    </>
+
+      <SmartOptimizer
+        isOpen={isSmartOptimizerOpen}
+        onClose={() => setIsSmartOptimizerOpen(false)}
+        suggestions={optimizationSuggestions}
+        onApply={handleApplySuggestion}
+        isDarkMode={isDarkMode}
+      />
+
+      <EnhancedOptimizerModal
+        isOpen={isEnhancedOptimizerOpen}
+        onClose={() => setIsEnhancedOptimizerOpen(false)}
+        csvData={csvData}
+        currentSchedule={scheduledClasses}
+        onOptimize={(optimizedSchedule) => {
+          optimizedSchedule.forEach(updatedClass => {
+            const existingClassIndex = scheduledClasses.findIndex(cls => cls.id === updatedClass.id);
+            if (existingClassIndex !== -1) {
+              onClassUpdate(updatedClass);
+            } else {
+              onClassAdd(updatedClass);
+            }
+          });
+        }}
+        isDarkMode={isDarkMode}
+      />
+    </div>
   );
 };
 

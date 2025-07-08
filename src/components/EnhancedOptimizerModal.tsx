@@ -37,7 +37,7 @@ const EnhancedOptimizerModal: React.FC<EnhancedOptimizerModalProps> = ({
 
     try {
       const optimizer = new EnhancedOptimizer(csvData);
-      const optimizedIterations = optimizer.generateOptimizedSchedules();
+      const optimizedIterations = await optimizer.generateOptimizedSchedules();
       setIterations(optimizedIterations);
       setSelectedIteration(optimizedIterations[0]?.id || '');
     } catch (error) {
