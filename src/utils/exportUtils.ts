@@ -425,3 +425,23 @@ export const printSchedule = async (classes: ScheduledClass[], options: ExportOp
     printWindow.close();
   }, 500);
 };
+
+export const exportScheduleToCSV = (classes: ScheduledClass[]) => {
+  const options: ExportOptions = {
+    includeTeacherInfo: true,
+    includeStats: true,
+    dateRange: 'all',
+    location: 'all'
+  };
+  return exportToCSV(classes, options);
+};
+
+export const exportScheduleToPDF = (classes: ScheduledClass[]) => {
+  const options: ExportOptions = {
+    includeTeacherInfo: true,
+    includeStats: true,
+    dateRange: 'all',
+    location: 'all'
+  };
+  return exportToPDF(classes, options);
+};

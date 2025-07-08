@@ -61,7 +61,7 @@ class AIService {
   ): Promise<ScheduledClass[]> {
     if (!this.provider || !this.provider.key || this.provider.key.trim() === '') {
       console.warn('🤖 AI Service: Provider not configured, using enhanced intelligent local optimization');
-      return await this.generateEnhancedLocalSchedule(historicData, currentSchedule, customTeachers, options);
+      return this.generateEnhancedLocalSchedule(historicData, currentSchedule, customTeachers, options);
     }
 
     const prompt = this.buildAdvancedOptimizationPrompt(historicData, currentSchedule, customTeachers, options);
@@ -74,7 +74,7 @@ class AIService {
       return optimizedSchedule;
     } catch (error) {
       console.warn('🤖 AI Service: Optimization error, falling back to enhanced intelligent local optimization:', error);
-      return await this.generateEnhancedLocalSchedule(historicData, currentSchedule, customTeachers, options);
+      return this.generateEnhancedLocalSchedule(historicData, currentSchedule, customTeachers, options);
     }
   }
 
@@ -763,7 +763,9 @@ class AIService {
       
       teacherDailyClasses[teacherName][cls.day] = (teacherDailyClasses[teacherName][cls.day] || 0) + 1;
       
-      if (!teacherLocations[teacherName][cls.day]) teacherLocations[teacherName][cls.day] = [];
+      if (!teacherLocations[teacherName][cls.day]) {
+        teacherLocations[teacherName][cls.day] = [];
+      }
       if (!teacherLocations[teacherName][cls.day].includes(cls.location)) {
         teacherLocations[teacherName][cls.day].push(cls.location);
       }

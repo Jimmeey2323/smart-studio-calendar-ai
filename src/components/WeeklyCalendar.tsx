@@ -372,12 +372,11 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
         </table>
       </div>
 
-      {/* Modals */}
+      {/* Fixed Modals */}
       <ClassModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         csvData={csvData}
-        day={selectedDay}
         time={selectedTime}
         location={selectedLocation}
         existingClass={editingClass}
@@ -395,12 +394,12 @@ const WeeklyCalendar: React.FC<WeeklyCalendarProps> = ({
         csvData={csvData}
         scheduledClasses={scheduledClasses}
         onSlotClick={handleSlotClick}
+        isDarkMode={isDarkMode}
       />
 
       <SmartOptimizer
         isOpen={isSmartOptimizerOpen}
         onClose={() => setIsSmartOptimizerOpen(false)}
-        suggestions={optimizationSuggestions}
         onApply={handleApplySuggestion}
         isDarkMode={isDarkMode}
       />
