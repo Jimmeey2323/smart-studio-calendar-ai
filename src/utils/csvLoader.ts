@@ -1,4 +1,3 @@
-
 import Papa from 'papaparse';
 import { ClassData, PriorityClass } from '../types';
 
@@ -133,7 +132,7 @@ export async function loadCSVFiles(): Promise<CSVLoadResult> {
   }
 
   try {
-    // Load Classes.csv - this appears to be the same structure as Scoring.csv based on the provided data
+    // Load Classes.csv - this contains the same structure as Scoring.csv but with top-performing classes
     console.log('🔄 Loading Classes.csv...');
     const classesResponse = await fetch('/Classes.csv');
     if (!classesResponse.ok) {
@@ -157,52 +156,102 @@ export async function loadCSVFiles(): Promise<CSVLoadResult> {
       result.errors.push(...classesParsed.errors.map(e => `Classes.csv: ${e.message}`));
     }
 
-    // Since Classes.csv has the same structure as Scoring.csv, we'll extract priority classes
-    // based on performance metrics from the Classes.csv data
+    // Extract priority classes from Classes.csv - all classes in this file are considered top performers
     console.log('📊 Extracting priority classes from Classes.csv data...');
+    console.log(`📋 Found ${classesParsed.data.length} total classes in Classes.csv`);
     
-    const topPerformingClasses = classesParsed.data
+    // Filter and sort classes for priority selection
+    const validClasses = classesParsed.data
       .filter((row: any) => {
-        // Filter for active, high-performing classes
-        const adjustedScore = parseFloat(row['Adjusted Score'] || '0');
-        const avgAttendance = parseFloat(row['Avg Attendance (w/o empty)'] || '0');
-        const classStatus = String(row['Class Status'] || '').trim();
-        const fillRate = parseFloat(row['Avg Fill Rate (%)'] || '0');
+        // Basic validation - ensure required fields exist
+        const hasBasicFields = row && 
+                              row['Cleaned Class'] && 
+                              row['Location'] && 
+                              row['Trainer Name'] && 
+                              row['Day of Week'] && 
+                              row['Class Time'];
         
-        return classStatus === 'Active' && 
-               adjustedScore > 150 && 
-               avgAttendance >= 6 && 
-               fillRate >= 50;
+        if (!hasBasicFields) {
+          console.log('❌ Skipping row due to missing basic fields:', row);
+          return false;
+        }
+
+        // Check class status
+        const classStatus = String(row['Class Status'] || '').trim().toLowerCase();
+        const isActive = classStatus === 'active' || classStatus === '';
+        
+        // Get performance metrics
+        const adjustedScore = parseFloat(row['Adjusted Score'] || '0');
+        const avgAttendanceWithEmpty = parseFloat(row['Avg Attendance (with empty)'] || '0');
+        const avgAttendanceWithoutEmpty = parseFloat(row['Avg Attendance (w/o empty)'] || '0');
+        const fillRate = parseFloat(row['Avg Fill Rate (%)'] || '0');
+        const revenuePerClass = parseFloat(row['Revenue Per Class'] || '0');
+        
+        // Use the better attendance metric (without empty is usually higher and more meaningful)
+        const bestAttendance = Math.max(avgAttendanceWithEmpty, avgAttendanceWithoutEmpty);
+        
+        // More inclusive criteria for priority classes
+        const meetsCriteria = isActive && 
+                             adjustedScore > 100 && // Lower threshold
+                             bestAttendance >= 5 && // Lower attendance threshold
+                             fillRate >= 30; // Lower fill rate threshold
+        
+        if (!meetsCriteria) {
+          console.log(`❌ Class filtered out: ${row['Cleaned Class']} - Score: ${adjustedScore}, Attendance: ${bestAttendance}, Fill Rate: ${fillRate}%, Status: ${classStatus}`);
+        }
+        
+        return meetsCriteria;
       })
       .sort((a: any, b: any) => {
-        // Sort by adjusted score descending
+        // Sort by adjusted score descending (higher is better)
         const scoreA = parseFloat(a['Adjusted Score'] || '0');
         const scoreB = parseFloat(b['Adjusted Score'] || '0');
         return scoreB - scoreA;
-      })
-      .slice(0, 30) // Top 30 performing classes
+      });
+
+    console.log(`📋 ${validClasses.length} classes passed filtering criteria`);
+
+    // Take top 40 classes to ensure good variety
+    const topPerformingClasses = validClasses
+      .slice(0, 40)
       .map((row: any, index: number) => {
         const className = String(row['Cleaned Class'] || '').trim();
         const dayOfWeek = String(row['Day of Week'] || '').trim();
         const classTime = String(row['Class Time'] || '').trim();
         const location = String(row['Location'] || '').trim();
         const trainerName = String(row['Trainer Name'] || '').trim();
-        const adjustedScore = parseFloat(row['Adjusted Score'] || '0');
-        const avgAttendance = parseFloat(row['Avg Attendance (w/o empty)'] || '0');
         
-        return {
+        // Get performance metrics with correct column names
+        const adjustedScore = parseFloat(row['Adjusted Score'] || '0');
+        const avgAttendanceWithEmpty = parseFloat(row['Avg Attendance (with empty)'] || '0');
+        const avgAttendanceWithoutEmpty = parseFloat(row['Avg Attendance (w/o empty)'] || '0');
+        const fillRate = parseFloat(row['Avg Fill Rate (%)'] || '0');
+        const revenuePerClass = parseFloat(row['Revenue Per Class'] || '0');
+        
+        // Use the better attendance metric
+        const bestAttendance = Math.max(avgAttendanceWithEmpty, avgAttendanceWithoutEmpty);
+        
+        const priorityClass: PriorityClass = {
           className,
-          priority: 30 - index, // Higher priority for better performing classes
-          mustInclude: index < 15, // Top 15 are must-include
+          priority: 40 - index, // Higher priority for better performing classes
+          mustInclude: index < 20, // Top 20 are must-include
           dayOfWeek,
           classTime,
           location,
           trainerName,
           adjustedScore,
-          avgAttendance,
+          avgAttendance: bestAttendance,
+          avgAttendanceWithEmpty,
+          avgAttendanceWithoutEmpty,
+          fillRate,
+          revenuePerClass,
           // Create a unique key for this specific class-day-time-location-trainer combination
           scheduleKey: `${className}-${dayOfWeek}-${classTime}-${location}-${trainerName}`
         };
+        
+        console.log(`✅ Priority class #${index + 1}: ${className} with ${trainerName} - ${dayOfWeek} ${classTime} at ${location} (Score: ${adjustedScore}, Attendance: ${bestAttendance})`);
+        
+        return priorityClass;
       });
 
     result.priorityClasses = topPerformingClasses;
@@ -211,7 +260,7 @@ export async function loadCSVFiles(): Promise<CSVLoadResult> {
     // Log the top 10 priority classes for verification
     console.log('🏆 Top 10 Priority Classes:');
     result.priorityClasses.slice(0, 10).forEach((pc, idx) => {
-      console.log(`${idx + 1}. ${pc.className} with ${pc.trainerName} - ${pc.dayOfWeek} ${pc.classTime} at ${pc.location} (Score: ${pc.adjustedScore})`);
+      console.log(`${idx + 1}. ${pc.className} with ${pc.trainerName} - ${pc.dayOfWeek} ${pc.classTime} at ${pc.location} (Score: ${pc.adjustedScore}, Attendance: ${pc.avgAttendance})`);
     });
 
   } catch (error) {
@@ -224,19 +273,23 @@ export async function loadCSVFiles(): Promise<CSVLoadResult> {
       
       // Get top performing classes based on adjusted score and attendance
       const topClasses = result.scoringData
-        .filter(item => item.adjustedScore && item.avgAttendanceWithEmpty && item.avgAttendanceWithEmpty >= 6)
+        .filter(item => item.adjustedScore && item.avgAttendanceWithEmpty && item.avgAttendanceWithEmpty >= 5)
         .sort((a, b) => (b.adjustedScore || 0) - (a.adjustedScore || 0))
-        .slice(0, 20) // Top 20 classes
+        .slice(0, 30) // Top 30 classes
         .map((item, index) => ({
           className: item.cleanedClass,
-          priority: 20 - index, // Higher priority for better performing classes
-          mustInclude: index < 10, // Top 10 are must-include
+          priority: 30 - index, // Higher priority for better performing classes
+          mustInclude: index < 15, // Top 15 are must-include
           dayOfWeek: item.dayOfWeek,
           classTime: item.classTime,
           location: item.location,
           trainerName: item.teacherName,
           adjustedScore: item.adjustedScore || 0,
           avgAttendance: item.avgAttendanceWithEmpty || 0,
+          avgAttendanceWithEmpty: item.avgAttendanceWithEmpty || 0,
+          avgAttendanceWithoutEmpty: item.avgAttendanceWithoutEmpty || 0,
+          fillRate: item.avgFillRate || 0,
+          revenuePerClass: item.revenuePerClass || 0,
           scheduleKey: `${item.cleanedClass}-${item.dayOfWeek}-${item.classTime}-${item.location}-${item.teacherName}`
         }));
 
@@ -271,7 +324,13 @@ export function getPriorityClassSchedules(priorityClasses: PriorityClass[]): any
       trainerName: pc.trainerName,
       priority: pc.priority,
       mustInclude: pc.mustInclude,
-      scheduleKey: pc.scheduleKey
+      scheduleKey: pc.scheduleKey,
+      adjustedScore: pc.adjustedScore,
+      avgAttendance: pc.avgAttendance,
+      avgAttendanceWithEmpty: pc.avgAttendanceWithEmpty,
+      avgAttendanceWithoutEmpty: pc.avgAttendanceWithoutEmpty,
+      fillRate: pc.fillRate,
+      revenuePerClass: pc.revenuePerClass
     }));
 }
 
