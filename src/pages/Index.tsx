@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { CalendarHeader } from '../components/CalendarHeader';
 import { WeeklyCalendar } from '../components/WeeklyCalendar';
@@ -30,7 +29,8 @@ const Index = () => {
 
   useEffect(() => {
     if (classData.length > 0) {
-      generateEmptySchedule();
+      // Automatically populate with top performing sessions on location change
+      handleSmartSchedule();
     }
   }, [activeLocation, classData]);
 
@@ -151,8 +151,8 @@ const Index = () => {
       const newSchedule = await optimizer.smartSchedule(activeLocation);
       setSchedule(newSchedule);
       updateTrainerStats(newSchedule);
-      toast.success('Smart scheduling completed!', {
-        description: 'Top performing classes have been scheduled with best trainers'
+      toast.success('Top performing sessions scheduled!', {
+        description: 'Classes with highest historical performance have been automatically scheduled'
       });
     } catch (error) {
       console.error('Error in smart scheduling:', error);
@@ -183,14 +183,12 @@ const Index = () => {
   const handleMaxOutTrainers = () => {
     setIsLoading(true);
     try {
-      // Implementation for maxing out trainers to 15 hours
-      const newSchedule = [...schedule];
-      // Add logic to assign more classes to trainers who are under 15 hours
-      
-      setSchedule(newSchedule);
-      updateTrainerStats(newSchedule);
+      const optimizer = new AIOptimizer(classData, apiKey);
+      const maxedSchedule = optimizer.maxOutTrainers(schedule);
+      setSchedule(maxedSchedule);
+      updateTrainerStats(maxedSchedule);
       toast.success('Trainers maximized!', {
-        description: 'Trainer hours optimized to approach 15 hours per week'
+        description: 'Additional high-performing classes added to optimize trainer hours'
       });
     } catch (error) {
       console.error('Error maximizing trainers:', error);

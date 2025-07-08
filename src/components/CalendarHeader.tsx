@@ -32,7 +32,10 @@ export const CalendarHeader: React.FC<CalendarHeaderProps> = ({
           <h1 className="text-3xl font-bold text-white mb-2 bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">
             AI Studio Scheduler
           </h1>
-          <p className="text-blue-200">Intelligent class scheduling powered by performance analytics</p>
+          <p className="text-blue-200">Auto-populated with top performing sessions based on historical data</p>
+          <p className="text-blue-300 text-sm mt-1">
+            ✨ Classes ranked by attendance, revenue, and performance metrics
+          </p>
         </div>
         
         <Tabs value={activeLocation} onValueChange={onLocationChange} className="bg-white/10 rounded-lg p-1">
@@ -60,7 +63,7 @@ export const CalendarHeader: React.FC<CalendarHeaderProps> = ({
           className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white border-0"
         >
           <Sparkles className="w-4 h-4 mr-2" />
-          Smart Scheduling
+          Refresh Top Sessions
         </Button>
         
         <Button 
@@ -69,7 +72,7 @@ export const CalendarHeader: React.FC<CalendarHeaderProps> = ({
           className="bg-gradient-to-r from-blue-500 to-cyan-600 hover:from-blue-600 hover:to-cyan-700 text-white border-0"
         >
           <Zap className="w-4 h-4 mr-2" />
-          Optimize Slots
+          Optimize Time Distribution
         </Button>
         
         <Button 
@@ -78,7 +81,7 @@ export const CalendarHeader: React.FC<CalendarHeaderProps> = ({
           className="bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white border-0"
         >
           <Users className="w-4 h-4 mr-2" />
-          Max Out Trainers
+          Maximize Trainer Hours
         </Button>
         
         <Button 
