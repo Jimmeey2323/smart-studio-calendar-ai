@@ -720,11 +720,11 @@ function App() {
   const renderMainContent = () => {
     switch (activeView) {
       case 'monthly':
-        return <MonthlyView scheduledClasses={scheduledClasses} csvData={csvData} theme={theme} />;
+        return <MonthlyView scheduledClasses={scheduledClasses} csvData={csvData} />;
       case 'yearly':
-        return <YearlyView scheduledClasses={scheduledClasses} csvData={csvData} theme={theme} />;
+        return <YearlyView scheduledClasses={scheduledClasses} csvData={csvData} />;
       case 'analytics':
-        return <AnalyticsView scheduledClasses={scheduledClasses} csvData={csvData} theme={theme} />;
+        return <AnalyticsView scheduledClasses={scheduledClasses} csvData={csvData} />;
       default:
         return (
           <>
@@ -1021,7 +1021,6 @@ function App() {
             csvData={csvData}
             currentSchedule={scheduledClasses}
             onOptimize={handleOptimizedSchedule}
-            theme={theme}
           />
         )}
 
@@ -1033,7 +1032,6 @@ function App() {
             csvData={csvData}
             currentSchedule={scheduledClasses}
             onOptimize={handleOptimizedSchedule}
-            theme={theme}
           />
         )}
 
@@ -1045,7 +1043,6 @@ function App() {
             csvData={csvData}
             currentSchedule={scheduledClasses}
             onOptimize={handleOptimizedSchedule}
-            theme={theme}
           />
         )}
 
@@ -1055,7 +1052,6 @@ function App() {
           onClose={() => setShowExportModal(false)}
           scheduledClasses={scheduledClasses}
           location={activeTab}
-          theme={theme}
         />
 
         {/* Studio Settings Modal */}

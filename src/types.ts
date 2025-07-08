@@ -53,6 +53,13 @@ export interface PriorityClass {
   className: string;
   priority: number;
   mustInclude: boolean;
+  dayOfWeek: string;
+  classTime: string;
+  location: string;
+  trainerName: string;
+  adjustedScore: number;
+  avgAttendance: number;
+  scheduleKey: string;
 }
 
 export interface ScheduledClass {
@@ -73,6 +80,9 @@ export interface ScheduledClass {
   clientDetails?: string; // For hosted classes
   isHosted?: boolean; // Flag for hosted classes
   isPriorityClass?: boolean; // Flag for priority classes from Classes.csv
+  adjustedScore?: number;
+  avgAttendance?: number;
+  fillRate?: number;
 }
 
 export interface TeacherHours {
