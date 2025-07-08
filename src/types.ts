@@ -1,3 +1,4 @@
+
 export interface ClassData {
   variantName: string;
   classDate: string;
@@ -59,6 +60,10 @@ export interface PriorityClass {
   trainerName: string;
   adjustedScore: number;
   avgAttendance: number;
+  avgAttendanceWithEmpty: number;
+  avgAttendanceWithoutEmpty: number;
+  fillRate: number;
+  revenuePerClass: number;
   scheduleKey: string;
 }
 
